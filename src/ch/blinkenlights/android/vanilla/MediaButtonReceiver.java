@@ -170,14 +170,23 @@ public class MediaButtonReceiver extends BroadcastReceiver {
 		case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
 			// single click: pause/resume.
 			// double click: next track
+			// long click: previous track
 
 			if (action == KeyEvent.ACTION_DOWN) {
 				long time = SystemClock.uptimeMillis();
-				if (time - sLastClickTime < DOUBLE_CLICK_DELAY) {
-					beep(context);
-					act = PlaybackService.ACTION_NEXT_SONG_AUTOPLAY;
-				} else {
-					act = PlaybackService.ACTION_TOGGLE_PLAYBACK;
+				long repeatCount = event.getRepeatCount();
+				if (repeatCount < 2) {
+					if (repeatCount == 1) {
+						beep(context);
+						act = PlaybackService.ACTION_REWIND_SONG;
+					} else {
+						if (time - sLastClickTime < DOUBLE_CLICK_DELAY) {
+							beep(context);
+							act = PlaybackService.ACTION_NEXT_SONG_AUTOPLAY;
+						} else {
+							act = PlaybackService.ACTION_TOGGLE_PLAYBACK;
+						}
+					}
 				}
 				sLastClickTime = time;
 			}
