@@ -34,17 +34,22 @@ import android.os.Build;
 import android.os.SystemClock;
 import android.telephony.TelephonyManager;
 import android.view.KeyEvent;
+import java.util.Timer;
+import java.util.TimerTask;
+import android.os.Handler;
 
 /**
  * Receives media button events and calls to PlaybackService to respond
  * appropriately.
  */
 public class MediaButtonReceiver extends BroadcastReceiver {
-		/**
+	/**
 	 * If another button event is received before this time in milliseconds
 	 * expires, the event with be considered a double click.
 	 */
 	private static final int DOUBLE_CLICK_DELAY = 400;
+	
+	private static final int LONG_CLICK_DELAY = 600;
 
 	/**
 	 * Whether the headset controls should be used. 1 for yes, 0 for no, -1 for
@@ -60,6 +65,8 @@ public class MediaButtonReceiver extends BroadcastReceiver {
 	 * Time of the last play/pause click. Used to detect double-clicks.
 	 */
 	private static long sLastClickTime = 0;
+	private static long sLastKeyDownTime = 0;
+	private static long sLastKeyUpTime = 0;
 	/**
 	 * Whether a beep should be played in response to double clicks be used.
 	 * 1 for yes, 0 for no, -1 for uninitialized.
@@ -73,6 +80,8 @@ public class MediaButtonReceiver extends BroadcastReceiver {
 	 * Lazy-loaded URI of the beep resource.
 	 */
 	private static Uri sBeepSound;
+	
+	private static Timer timerLongClick = null;
 
 	/**
 	 * Play a beep sound.
@@ -148,6 +157,23 @@ public class MediaButtonReceiver extends BroadcastReceiver {
 	{
 		sInCall = value ? 1 : 0;
 	}
+	
+	private static void cancelLongClickTimer()
+	{
+		if (timerLongClick != null) {
+			timerLongClick.cancel();
+			timerLongClick = null;
+		}	
+	}
+	
+	private static void runPlaybackAction(Context context, String act)
+	{
+		if (act != null) {
+			Intent intent = new Intent(context, PlaybackService.class);
+			intent.setAction(act);
+			context.startService(intent);
+		}
+	}
 
 	/**
 	 * Process a media button key press.
@@ -172,24 +198,46 @@ public class MediaButtonReceiver extends BroadcastReceiver {
 			// double click: next track
 			// long click: previous track
 
-			if (action == KeyEvent.ACTION_DOWN) {
-				long time = SystemClock.uptimeMillis();
-				long repeatCount = event.getRepeatCount();
-				if (repeatCount < 2) {
-					if (repeatCount == 1) {
-						beep(context);
-						act = PlaybackService.ACTION_REWIND_SONG;
-					} else {
-						if (time - sLastClickTime < DOUBLE_CLICK_DELAY) {
-							beep(context);
-							act = PlaybackService.ACTION_NEXT_SONG_AUTOPLAY;
-						} else {
-							act = PlaybackService.ACTION_TOGGLE_PLAYBACK;
-						}
-					}
+			final long time = SystemClock.uptimeMillis();
+
+			switch (action) {
+			case KeyEvent.ACTION_DOWN:
+				if (event.getRepeatCount() != 0)
+					break;
+
+				final Handler myHandler = new Handler();
+				final Context myContext = context.getApplicationContext();
+				if (timerLongClick == null) {
+					timerLongClick = new Timer();
 				}
-				sLastClickTime = time;
+				timerLongClick.schedule(new TimerTask() {
+					@Override
+					public void run() {
+						myHandler.post(new Runnable() {
+							@Override
+							public void run() {
+								beep(myContext);
+								runPlaybackAction(myContext, PlaybackService.ACTION_REWIND_SONG);
+							}
+						});
+					}
+				}, LONG_CLICK_DELAY);
+
+				if (time - sLastKeyDownTime < DOUBLE_CLICK_DELAY) {
+					cancelLongClickTimer();
+					beep(context);
+					act = PlaybackService.ACTION_NEXT_SONG_AUTOPLAY;
+				} else {
+					act = PlaybackService.ACTION_TOGGLE_PLAYBACK;
+				}
+				sLastKeyDownTime = time;
+				break;
+			case KeyEvent.ACTION_UP:
+				cancelLongClickTimer();
+				sLastKeyUpTime = time;
+				break;
 			}
+			sLastClickTime = time;
 			break;
 		case KeyEvent.KEYCODE_MEDIA_NEXT:
 			if (action == KeyEvent.ACTION_DOWN)
@@ -211,11 +259,7 @@ public class MediaButtonReceiver extends BroadcastReceiver {
 			return false;
 		}
 
-		if (act != null) {
-			Intent intent = new Intent(context, PlaybackService.class);
-			intent.setAction(act);
-			context.startService(intent);
-		}
+		runPlaybackAction(context, act);
 
 		return true;
 	}
